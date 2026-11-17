@@ -1,91 +1,103 @@
+/*
+ * Lecture 3 - Homework
+ *
+ * GOAL: Demonstrate event-driven execution using Zephyr workqueues.
+ *
+ * BONUS:
+ * Generate 50 events at 5ms intervals.
+ * Use k_work_reschedule() with a 30ms delay.
+ * Only one handler execution should occur after the event burst.
+ */
+
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(race_demo, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(homework, LOG_LEVEL_DBG);
 
-#define STACK_SIZE 1024
+#define STACK_SIZE    1024
+#define EVENT_DELAY   5
+#define DEBOUNCE_MS   30
+#define EVENT_COUNT   5
 
-#define PRIO_A 3
-#define PRIO_B 1
+/* Statistics */
+static int total_events;
+static int total_processed;
 
-volatile int a = 0;
+/* Work handler declaration */
+static void handler_fn(struct k_work *work);
 
-struct k_mutex  my_mutex ;
+/* Define delayable work item */
+K_WORK_DELAYABLE_DEFINE(work, handler_fn);
 
+/* ---------------------------------------------------------- */
+/* Sensor simulation thread                                   */
+/* ---------------------------------------------------------- */
 
-
-
-void thread_a_fn(void *p1, void *p2, void *p3)
+static void sensor_sim_fn(void *p1, void *p2, void *p3)
 {
-    while (1) {
-        if(k_mutex_lock(&my_mutex,K_FOREVER)==0)
-        {
-            int temp;
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
 
-            temp = a;
+    for (int i = 0; i < EVENT_COUNT; i++) {
 
-            LOG_INF("THREAD A: read     = %d", temp);
+        k_msleep(EVENT_DELAY);
 
-            temp = temp + 1;
+        total_events++;
 
-            a = temp;
+        LOG_INF("[SENSOR] event %d tick=%u",
+                i, k_uptime_get_32());
 
-            LOG_INF("THREAD A: wrote     = %d", a);
+        int ret = k_work_reschedule(&work, K_MSEC(DEBOUNCE_MS));
 
-            k_mutex_unlock(&my_mutex);
-
-            k_msleep(1000);
-        }
-
-        
-    }
-}
-
-void thread_b_fn(void *p1, void *p2, void *p3)
-{
-    while (1) {
-
-         if(k_mutex_lock(&my_mutex,K_FOREVER)==0)
-        {
-
-        int temp;
-
-        temp = a;
-
-        LOG_INF("THREAD B: read     = %d", temp);
-
-        temp = temp + 1;
-
-        a = temp;
-
-        LOG_INF("THREAD B: wrote     = %d", a);
-
-        k_msleep(20);
-
-        k_mutex_unlock(&my_mutex);
-
+        if (ret < 0) {
+            LOG_ERR("Work reschedule failed: %d", ret);
         }
     }
+
+    LOG_INF("[SENSOR] all events produced");
 }
 
-K_THREAD_DEFINE(thread_a,
-                STACK_SIZE,
-                thread_a_fn,
-                NULL, NULL, NULL,
-                PRIO_A,
-                0,
-                0);
+/* ---------------------------------------------------------- */
+/* Work handler                                               */
+/* ---------------------------------------------------------- */
 
-K_THREAD_DEFINE(thread_b,
+static void handler_fn(struct k_work *work)
+{
+    ARG_UNUSED(work);
+
+    total_processed++;
+
+    LOG_INF("[CONSUMER] processed event %d tick=%u",
+            total_processed, k_uptime_get_32());
+}
+
+/* ---------------------------------------------------------- */
+/* Thread definition                                          */
+/* ---------------------------------------------------------- */
+
+K_THREAD_DEFINE(sensor_thread,
                 STACK_SIZE,
-                thread_b_fn,
+                sensor_sim_fn,
                 NULL, NULL, NULL,
-                PRIO_B,
-                0,
-                0);
+                5, 0, 0);
+
+/* ---------------------------------------------------------- */
+/* Main                                                       */
+/* ---------------------------------------------------------- */
 
 int main(void)
 {
-     k_mutex_init (&my_mutex);
+    LOG_INF("=== L3 Homework: Workqueue Debouncing ===");
+    LOG_INF("Sensor event interval: %d ms", EVENT_DELAY);
+    LOG_INF("Debounce delay: %d ms", DEBOUNCE_MS);
+    LOG_INF("Total events: %d", EVENT_COUNT);
+
+    /* Wait for sensor events and final handler execution */
+    k_msleep((EVENT_COUNT * EVENT_DELAY) + DEBOUNCE_MS + 100);
+
+    LOG_INF("[SUMMARY] Total events: %d", total_events);
+    LOG_INF("[SUMMARY] Total processed: %d", total_processed);
+
     return 0;
 }
