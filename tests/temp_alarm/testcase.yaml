@@ -1,0 +1,8 @@
+tests:
+  temp_alarm.unit:
+    platform_allow:
+      - native_sim
+    tags:
+      - unit
+      - sensor
+      - temp_alarm
